@@ -14,6 +14,8 @@ This bot allows people to send their songs into group's messages for further pla
     - song_duration_limit_seconds: Song duration limit in seconds
     - clear_saved_songs: Clear all downloaded songs after start?
     - allow_anybody_to_manage: Allow non-admins to skip and remove songs
+5. Install requirements:
+```pip install -r ./requirements.txt```
 
 ## Running
 
