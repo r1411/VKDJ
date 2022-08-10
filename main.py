@@ -23,6 +23,7 @@ SONG_QUEUE = deque()
 DOWNLOAD_QUEUE = deque()
 CURRENT_SONG = None
 PAUSED = False
+FLAG_CLEARING = False
 
 def load_json_file(filename):
 	with open(filename, encoding='utf-8') as json_file:
@@ -42,9 +43,14 @@ def init_config():
 
 def clear_saved_songs():
 	for f in os.listdir(f'{WORKDIR}/saved_songs'):
-		os.remove(os.path.join(f'{WORKDIR}/saved_songs', f))
+		try:
+			os.remove(os.path.join(f'{WORKDIR}/saved_songs', f))
+		except (PermissionError, IsADirectoryError, FileNotFoundError) as e:
+			pass
 
 def download_worker():
+	global FLAG_CLEARING
+
 	while True:
 		while len(DOWNLOAD_QUEUE) == 0:
 			time.sleep(0.1)
@@ -53,8 +59,20 @@ def download_worker():
 		song_name = f"{audio['owner_id']}_{audio['id']}.mp3" 
 		song_path = f"{WORKDIR}/saved_songs/{song_name}"
 
+		# Prevent downloading file if songs were cleared
+		if FLAG_CLEARING:
+			time.sleep(0.5)
+			FLAG_CLEARING = False
+			continue
+
 		if not os.path.isfile(song_path):
 			wget.download(audio['url'], song_path, bar=None)
+
+		# Prevent adding downloaded file if songs were cleared 
+		if FLAG_CLEARING:
+			time.sleep(0.5)
+			FLAG_CLEARING = False
+			continue
 
 		audio['localpath'] = song_path
 		SONG_QUEUE.append(audio)
@@ -78,7 +96,7 @@ def media_player_worker():
 			time.sleep(0.1)
 
 def process_messages(api, longpoll):
-	global PAUSED
+	global PAUSED, FLAG_CLEARING, CURRENT_SONG
 
 	for event in longpoll.listen():
 		if event.type == VkBotEventType.MESSAGE_NEW and event.obj.message:      
@@ -92,8 +110,12 @@ def process_messages(api, longpoll):
 				if len(SONG_QUEUE) == 0:
 					api.messages.send(peer_id=msg['peer_id'], message="No songs in queue", random_id=randint(2, 9999999))
 					continue
+				
+				cur_title = "Nothing"
+				if CURRENT_SONG is not None:
+					cur_title = f"{CURRENT_SONG['artist']} — {CURRENT_SONG['title']}"
 
-				message = f"➡ Playing: {CURRENT_SONG['artist']} — {CURRENT_SONG['title']}\n"
+				message = f"➡ Playing: {cur_title}\n"
 				message += "Songs in queue:\n"
 				i = 1
 				for song in SONG_QUEUE:
@@ -169,12 +191,33 @@ def process_messages(api, longpoll):
 
 			if msg['text'].lower() == '/song':
 				if CURRENT_SONG is None:
-					api.messages.send(peer_id=msg['peer_id'], message="No song was played", random_id=randint(2, 9999999))
+					api.messages.send(peer_id=msg['peer_id'], message="No song has been played yet", random_id=randint(2, 9999999))
 					continue
 
 				api.messages.send(peer_id=msg['peer_id'], message=f"Song: {CURRENT_SONG['artist']} — {CURRENT_SONG['title']}", random_id=randint(2, 9999999))
 
 				continue
+
+			if msg['text'].lower() == '/clear':
+				if msg['from_id'] in VK_ADMINS or ANY_MANAGE:
+					
+					FLAG_CLEARING = True
+					DOWNLOAD_QUEUE.clear()
+					SONG_QUEUE.clear()
+					CURRENT_SONG = None
+
+					mixer.music.stop()
+					mixer.music.unload()
+					
+					if CLEAR_SONGS:
+						clear_saved_songs()
+						print('Saved songs cleared')
+
+					api.messages.send(peer_id=msg['peer_id'], message=f"Cleared all songs", random_id=randint(2, 9999999))
+
+					continue
+				else:
+					api.messages.send(peer_id=msg['peer_id'], message="Error: You're not admin!", random_id=randint(2, 9999999))
 
 			if msg['text'].lower() == '/help':
 				message = "Bot commands list:\n"
@@ -183,6 +226,7 @@ def process_messages(api, longpoll):
 				message += "/skip - Skip current song\n"
 				message += "/pause - Pause / resume current song\n"
 				message += "/song - Show latest song\n"
+				message += "/clear - Clear songs queue\n"
 				message += "/help - Show this message\n"
 				api.messages.send(peer_id=msg['peer_id'], message=message, random_id=randint(2, 9999999))
 
@@ -216,6 +260,7 @@ def process_messages(api, longpoll):
 			if len(suitable_attachments) == 0:
 				api.messages.send(peer_id=msg['peer_id'], message='Error: No valid audio attached', random_id=randint(2, 9999999))
 			else:
+				FLAG_CLEARING = False
 				DOWNLOAD_QUEUE.extend(suitable_attachments)
 				api.messages.send(peer_id=msg['peer_id'], message=f'Adding {len(suitable_attachments)} track{"s" if len(suitable_attachments) > 1 else ""} to playlist.', random_id=randint(2, 9999999))
 

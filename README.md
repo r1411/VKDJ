@@ -37,6 +37,7 @@ Available commands:
 - /skip - Skip current song
 - /pause - Pause / resume current song
 - /song - Show latest song
+- /clear - Clear songs queue
 - /help - Show these commands
 
 ## License
