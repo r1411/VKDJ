@@ -20,6 +20,7 @@ ANY_MANAGE = None
 
 WORKDIR = Path(__file__).parent.resolve()
 SONG_QUEUE = deque()
+DOWNLOAD_QUEUE = deque()
 CURRENT_SONG = None
 PAUSED = False
 
@@ -43,15 +44,21 @@ def clear_saved_songs():
 	for f in os.listdir(f'{WORKDIR}/saved_songs'):
 		os.remove(os.path.join(f'{WORKDIR}/saved_songs', f))
 
-def add_audios(audios):
-	for audio in audios:
+def download_worker():
+	while True:
+		while len(DOWNLOAD_QUEUE) == 0:
+			time.sleep(0.1)
+		
+		audio = DOWNLOAD_QUEUE.popleft()
 		song_name = f"{audio['owner_id']}_{audio['id']}.mp3" 
 		song_path = f"{WORKDIR}/saved_songs/{song_name}"
+
 		if not os.path.isfile(song_path):
 			wget.download(audio['url'], song_path, bar=None)
 
 		audio['localpath'] = song_path
 		SONG_QUEUE.append(audio)
+
 
 def media_player_worker():
 	global CURRENT_SONG, PAUSED
@@ -209,8 +216,8 @@ def process_messages(api, longpoll):
 			if len(suitable_attachments) == 0:
 				api.messages.send(peer_id=msg['peer_id'], message='Error: No valid audio attached', random_id=randint(2, 9999999))
 			else:
-				threading.Thread(target=add_audios, args=[suitable_attachments]).start()
-				api.messages.send(peer_id=msg['peer_id'], message=f'Adding {len(suitable_attachments)} track{"s" if len(suitable_attachments) > 1 else ""} to playlist. New queue size: {len(SONG_QUEUE) + len(suitable_attachments)}', random_id=randint(2, 9999999))
+				DOWNLOAD_QUEUE.extend(suitable_attachments)
+				api.messages.send(peer_id=msg['peer_id'], message=f'Adding {len(suitable_attachments)} track{"s" if len(suitable_attachments) > 1 else ""} to playlist.', random_id=randint(2, 9999999))
 
 
 def main():
@@ -226,6 +233,9 @@ def main():
 
 	# Starting audio player thread
 	threading.Thread(target=media_player_worker, daemon=False).start()
+
+	# Starting donwloader thread
+	threading.Thread(target=download_worker, daemon=False).start()
 
 	# Starting VK longpoll bot
 	vk_session = vk_api.VkApi(token=VK_TOKEN, api_version=VK_V)
