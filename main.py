@@ -17,6 +17,7 @@ VK_ADMINS = None
 SONG_DURATION_LIMIT = None
 CLEAR_SONGS = None
 ANY_MANAGE = None
+ANY_PUSH_TOP = None
 
 WORKDIR = Path(__file__).parent.resolve()
 SONG_QUEUE = deque()
@@ -31,7 +32,7 @@ def load_json_file(filename):
 		return data
 
 def init_config():
-	global VK_TOKEN, VK_V, VK_GROUP, VK_ADMINS, SONG_DURATION_LIMIT, CLEAR_SONGS, ANY_MANAGE
+	global VK_TOKEN, VK_V, VK_GROUP, VK_ADMINS, SONG_DURATION_LIMIT, CLEAR_SONGS, ANY_MANAGE, ANY_PUSH_TOP
 	config = load_json_file(f'{WORKDIR}/config.json')
 	VK_TOKEN = config['vk_token']
 	VK_V = config['vk_v']
@@ -40,6 +41,7 @@ def init_config():
 	SONG_DURATION_LIMIT = config['song_duration_limit_seconds']
 	CLEAR_SONGS = config['clear_saved_songs']
 	ANY_MANAGE = config['allow_anybody_to_manage']
+	ANY_PUSH_TOP = config['allow_anybody_to_push_top']
 
 def clear_saved_songs():
 	for f in os.listdir(f'{WORKDIR}/saved_songs'):
@@ -75,7 +77,11 @@ def download_worker():
 			continue
 
 		audio['localpath'] = song_path
-		SONG_QUEUE.append(audio)
+		
+		if audio['top']:
+			SONG_QUEUE.appendleft(audio)
+		else:
+			SONG_QUEUE.append(audio)
 
 
 def media_player_worker():
@@ -227,6 +233,7 @@ def process_messages(api, longpoll):
 				message += "/pause - Pause / resume current song\n"
 				message += "/song - Show latest song\n"
 				message += "/clear - Clear songs queue\n"
+				message += "/top - Put attached audios on top of the queue\n"
 				message += "/help - Show this message\n"
 				api.messages.send(peer_id=msg['peer_id'], message=message, random_id=randint(2, 9999999))
 
@@ -254,6 +261,13 @@ def process_messages(api, longpoll):
 
 				if not attachment['audio']['url']:
 					continue
+				
+				push_on_top = False
+				if msg['text'].lower() == '/top':
+					if msg['from_id'] in VK_ADMINS or ANY_PUSH_TOP:
+						push_on_top = True
+
+				attachment['audio']['top'] = push_on_top
 
 				suitable_attachments.append(attachment['audio'])
 
